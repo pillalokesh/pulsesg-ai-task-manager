@@ -1,0 +1,1 @@
+package com.pulsesg.support.repository; import com.pulsesg.support.entity.TicketMessage; import java.util.*; import org.springframework.data.jpa.repository.JpaRepository; public interface TicketMessageRepository extends JpaRepository<TicketMessage,Long>{List<TicketMessage> findAllByTicketIdOrderByCreatedAtAsc(Long ticketId);}

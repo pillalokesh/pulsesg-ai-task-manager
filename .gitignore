@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+build/
+target/
+.idea/
+.vscode/
+*.iml
+*.pem
+*.key
+.terraform/
+*.tfstate
+*.tfstate.*
+.DS_Store

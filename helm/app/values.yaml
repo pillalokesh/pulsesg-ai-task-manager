@@ -1,0 +1,33 @@
+nameOverride: pulsesg-ai-task-manager
+namespace: pulsesg-dev
+frontend:
+  image: { repository: 385168913795.dkr.ecr.ap-south-1.amazonaws.com/pulsesg-ai-task-manager-frontend, tag: v1.0.0, pullPolicy: IfNotPresent }
+  apiBaseUrl: /support/api
+  basePath: /support/
+  replicas: 1
+  service: { port: 80 }
+  resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 250m, memory: 256Mi } }
+backend:
+  image: { repository: 385168913795.dkr.ecr.ap-south-1.amazonaws.com/pulsesg-ai-task-manager-backend, tag: v1.0.0, pullPolicy: IfNotPresent }
+  replicas: 1
+  service: { port: 8080 }
+  resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: 500m, memory: 512Mi } }
+  env: { corsOrigins: https://lokeshwaffles.in, contextPath: /support }
+  secret: { existingSecret: pulsesg-ai-task-manager-db, create: false, dbUrl: "", dbUsername: "", dbPassword: "", jwtSecret: "" }
+imagePullSecrets: []
+serviceAccount: { create: true, name: "" }
+ingress:
+  enabled: true
+  className: alb
+  host: lokeshwaffles.in
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /support/actuator/health
+  paths:
+    - path: /support/api
+      pathType: Prefix
+      service: backend
+    - path: /support
+      pathType: Prefix
+      service: frontend

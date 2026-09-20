@@ -1,0 +1,1 @@
+package com.pulsesg.support.repository; import com.pulsesg.support.entity.*; import java.util.*; import org.springframework.data.jpa.repository.JpaRepository; public interface TicketRepository extends JpaRepository<Ticket,Long>{List<Ticket> findAllByUserIdOrderByUpdatedAtDesc(Long userId); Optional<Ticket> findByIdAndUserId(Long id,Long userId);}
