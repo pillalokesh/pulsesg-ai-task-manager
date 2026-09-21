@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Service
+metadata: { name: {{ include "pulsesg-ai-task-manager.fullname" . }} }
+spec:
+  type: ClusterIP
+  selector: { app: {{ include "pulsesg-ai-task-manager.fullname" . }} }
+  ports:
+    - { name: http-frontend, port: {{ .Values.frontend.service.port }}, targetPort: http-frontend }
+    - { name: http-backend, port: {{ .Values.backend.service.port }}, targetPort: http-backend }

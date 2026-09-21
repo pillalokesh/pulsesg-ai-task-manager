@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pulsesg-ai-task-manager.fullname" . }}
+  labels: { app: {{ include "pulsesg-ai-task-manager.fullname" . }} }
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector: { matchLabels: { app: {{ include "pulsesg-ai-task-manager.fullname" . }} } }
+  template:
+    metadata: { labels: { app: {{ include "pulsesg-ai-task-manager.fullname" . }} } }
+    spec:
+      serviceAccountName: {{ include "pulsesg-ai-task-manager.serviceAccountName" . }}
+      containers:
+        - name: frontend
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          ports: [{ name: http-frontend, containerPort: {{ .Values.frontend.containerPort }} }]
+          resources: {{- toYaml .Values.frontend.resources | nindent 12 }}
+          readinessProbe: { httpGet: { path: /, port: http-frontend }, initialDelaySeconds: 5, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /, port: http-frontend }, initialDelaySeconds: 15, periodSeconds: 20 }
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports: [{ name: http-backend, containerPort: {{ .Values.backend.containerPort }} }]
+          envFrom: [{ secretRef: { name: {{ .Values.backend.secret.existingSecret }} } }, { configMapRef: { name: {{ include "pulsesg-ai-task-manager.fullname" . }}-config } }]
+          resources: {{- toYaml .Values.backend.resources | nindent 12 }}
+          readinessProbe: { httpGet: { path: /support/actuator/health, port: http-backend }, initialDelaySeconds: 20, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /support/actuator/health, port: http-backend }, initialDelaySeconds: 30, periodSeconds: 20 }

@@ -15,9 +15,10 @@ pipeline {
     FRONTEND_ECR_REPOSITORY = 'pulsesg-ai-task-manager-frontend'
     BACKEND_ECR_REPOSITORY = 'pulsesg-ai-task-manager-backend'
     DB_SECRET_NAME = 'pulsesg-ai-task-manager-db'
+    APP_DOMAIN = 'https://lokeshwaffle.in/support/'
   }
   stages {
-    stage('Validate parameters') {
+    stage('Checkout exact Git Tag') {
       steps {
         script {
           if (params.Environment != 'dev') { error('Only the configured dev environment is allowed') }
@@ -27,10 +28,6 @@ pipeline {
           env.FRONTEND_IMAGE = "${env.ECR_REGISTRY}/${env.FRONTEND_ECR_REPOSITORY}:${env.IMAGE_TAG}"
           env.BACKEND_IMAGE = "${env.ECR_REGISTRY}/${env.BACKEND_ECR_REPOSITORY}:${env.IMAGE_TAG}"
         }
-      }
-    }
-    stage('Checkout exact Git tag') {
-      steps {
         checkout scm
         sh 'git fetch --force --tags --prune'
         sh 'git rev-parse --verify "refs/tags/${IMAGE_TAG}^{commit}" >/dev/null'
@@ -38,7 +35,7 @@ pipeline {
         sh 'test "$(git describe --tags --exact-match HEAD)" = "${IMAGE_TAG}"'
       }
     }
-    stage('Frontend test') {
+    stage('Frontend Test') {
       steps {
         dir('frontend') {
           sh 'npm ci'
@@ -46,38 +43,38 @@ pipeline {
         }
       }
     }
-    stage('Frontend production build') {
+    stage('Frontend Build') {
       steps {
         dir('frontend') {
           sh 'npm run build'
         }
       }
     }
-    stage('Backend test') {
+    stage('Backend Test') {
       steps {
         dir('backend') {
           sh 'mvn --batch-mode clean test'
         }
       }
     }
-    stage('Backend Maven build') {
+    stage('Backend Build') {
       steps {
         dir('backend') {
           sh 'mvn --batch-mode clean package -DskipTests'
         }
       }
     }
-    stage('Docker build frontend') {
+    stage('Docker Build Frontend') {
       steps {
         sh 'docker build --build-arg VITE_API_BASE_URL=/support/api --build-arg VITE_BASE_PATH=/support/ -t "$FRONTEND_IMAGE" frontend'
       }
     }
-    stage('Docker build backend') {
+    stage('Docker Build Backend') {
       steps {
         sh 'docker build -t "$BACKEND_IMAGE" backend'
       }
     }
-    stage('ECR login') {
+    stage('ECR Login') {
       steps {
         withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
           sh 'aws ecr describe-repositories --repository-names "$FRONTEND_ECR_REPOSITORY" "$BACKEND_ECR_REPOSITORY"'
@@ -85,59 +82,55 @@ pipeline {
         }
       }
     }
-    stage('Push frontend image') {
+    stage('Push Frontend Image') {
       steps {
         withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
           sh 'docker push "$FRONTEND_IMAGE"'
         }
       }
     }
-    stage('Push backend image') {
+    stage('Push Backend Image') {
       steps {
         withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
           sh 'docker push "$BACKEND_IMAGE"'
         }
       }
     }
-    stage('Configure EKS access') {
+    stage('Configure EKS') {
       steps {
         withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
           sh 'aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"'
         }
       }
     }
-    stage('Helm upgrade/install') {
+    stage('Helm Deploy') {
       steps {
         sh 'helm upgrade --install "$HELM_RELEASE" "$HELM_CHART" --namespace "$KUBE_NAMESPACE" --create-namespace --set-string frontend.image.repository="$ECR_REGISTRY/$FRONTEND_ECR_REPOSITORY" --set-string frontend.image.tag="$IMAGE_TAG" --set-string backend.image.repository="$ECR_REGISTRY/$BACKEND_ECR_REPOSITORY" --set-string backend.image.tag="$IMAGE_TAG" --set-string backend.secret.existingSecret="$DB_SECRET_NAME"'
       }
     }
-    stage('Rollout frontend') {
+    stage('Rollout Verification') {
       steps {
-        sh 'kubectl rollout status deployment/$HELM_RELEASE-frontend --namespace "$KUBE_NAMESPACE" --timeout=180s'
-        sh 'kubectl wait --for=condition=Ready pod -l app=$HELM_RELEASE-frontend --namespace "$KUBE_NAMESPACE" --timeout=180s'
+        sh 'kubectl rollout status deployment/$HELM_RELEASE --namespace "$KUBE_NAMESPACE" --timeout=180s'
+        sh 'kubectl wait --for=condition=Ready pod -l app=$HELM_RELEASE --namespace "$KUBE_NAMESPACE" --timeout=180s'
       }
     }
-    stage('Rollout backend') {
+    stage('Health Verification') {
       steps {
-        sh 'kubectl rollout status deployment/$HELM_RELEASE-backend --namespace "$KUBE_NAMESPACE" --timeout=180s'
-        sh 'kubectl wait --for=condition=Ready pod -l app=$HELM_RELEASE-backend --namespace "$KUBE_NAMESPACE" --timeout=180s'
+        sh 'kubectl port-forward service/$HELM_RELEASE 18080:8080 --namespace "$KUBE_NAMESPACE" >/tmp/$HELM_RELEASE-port-forward.log 2>&1 & PF_PID=$!; trap "kill $PF_PID" EXIT; sleep 5; curl --fail --silent --show-error http://127.0.0.1:18080/support/actuator/health'
       }
     }
-    stage('Health verification') {
+    stage('Final Deployment Summary') {
       steps {
-        sh 'kubectl get pods,services,ingress --namespace "$KUBE_NAMESPACE"'
-        sh 'kubectl port-forward service/$HELM_RELEASE-backend 18080:8080 --namespace "$KUBE_NAMESPACE" >/tmp/$HELM_RELEASE-port-forward.log 2>&1 & PF_PID=$!; trap "kill $PF_PID" EXIT; sleep 5; curl --fail --silent --show-error http://127.0.0.1:18080/support/actuator/health'
+        script {
+          env.POD_NAME = sh(
+            script: 'kubectl get pods --namespace "$KUBE_NAMESPACE" -l app=$HELM_RELEASE -o jsonpath="{.items[0].metadata.name}"',
+            returnStdout: true
+          ).trim()
+        }
+        echo "Application: pulsesg-ai-task-manager"
+        echo "Domain: ${env.APP_DOMAIN}"
+        echo "Pod: ${env.POD_NAME}"
       }
-    }
-    stage('Deployment summary') {
-      steps {
-        echo "Deployment summary: application=${params.Application}, environment=${params.Environment}, gitTag=${params['Git Tag']}, imageVersion=${env.IMAGE_TAG}, helmRelease=${env.HELM_RELEASE}, namespace=${env.KUBE_NAMESPACE}"
-      }
-    }
-  }
-  post {
-    always {
-      echo "Deployment finished: application=${params.Application}, environment=${params.Environment}, gitTag=${params['Git Tag']}, imageVersion=${env.IMAGE_TAG}, helmRelease=${env.HELM_RELEASE}, namespace=${env.KUBE_NAMESPACE}"
     }
   }
 }
