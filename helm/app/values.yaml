@@ -25,6 +25,8 @@ ingress:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/healthcheck-path: /support/actuator/health
+    alb.ingress.kubernetes.io/group.name: pulsesg-dev
+    alb.ingress.kubernetes.io/group.order: "10"
   paths:
     - path: /support/api
       pathType: Prefix
