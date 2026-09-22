@@ -105,27 +105,35 @@ pipeline {
     }
     stage('Helm Deploy') {
       steps {
-        sh 'helm upgrade --install "$HELM_RELEASE" "$HELM_CHART" --namespace "$KUBE_NAMESPACE" --create-namespace --set-string frontend.image.repository="$ECR_REGISTRY/$FRONTEND_ECR_REPOSITORY" --set-string frontend.image.tag="$IMAGE_TAG" --set-string backend.image.repository="$ECR_REGISTRY/$BACKEND_ECR_REPOSITORY" --set-string backend.image.tag="$IMAGE_TAG" --set-string backend.secret.existingSecret="$DB_SECRET_NAME"'
+        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
+          sh 'helm upgrade --install "$HELM_RELEASE" "$HELM_CHART" --namespace "$KUBE_NAMESPACE" --create-namespace --set-string frontend.image.repository="$ECR_REGISTRY/$FRONTEND_ECR_REPOSITORY" --set-string frontend.image.tag="$IMAGE_TAG" --set-string backend.image.repository="$ECR_REGISTRY/$BACKEND_ECR_REPOSITORY" --set-string backend.image.tag="$IMAGE_TAG" --set-string backend.secret.existingSecret="$DB_SECRET_NAME"'
+        }
       }
     }
     stage('Rollout Verification') {
       steps {
-        sh 'kubectl rollout status deployment/$HELM_RELEASE --namespace "$KUBE_NAMESPACE" --timeout=180s'
-        sh 'kubectl wait --for=condition=Ready pod -l app=$HELM_RELEASE --namespace "$KUBE_NAMESPACE" --timeout=180s'
+        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
+          sh 'kubectl rollout status deployment/$HELM_RELEASE --namespace "$KUBE_NAMESPACE" --timeout=180s'
+          sh 'kubectl wait --for=condition=Ready pod -l app=$HELM_RELEASE --namespace "$KUBE_NAMESPACE" --timeout=180s'
+        }
       }
     }
     stage('Health Verification') {
       steps {
-        sh 'kubectl port-forward service/$HELM_RELEASE 18080:8080 --namespace "$KUBE_NAMESPACE" >/tmp/$HELM_RELEASE-port-forward.log 2>&1 & PF_PID=$!; trap "kill $PF_PID" EXIT; sleep 5; curl --fail --silent --show-error http://127.0.0.1:18080/support/actuator/health'
+        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
+          sh 'kubectl port-forward service/$HELM_RELEASE 18080:8080 --namespace "$KUBE_NAMESPACE" >/tmp/$HELM_RELEASE-port-forward.log 2>&1 & PF_PID=$!; trap "kill $PF_PID" EXIT; sleep 5; curl --fail --silent --show-error http://127.0.0.1:18080/support/actuator/health'
+        }
       }
     }
     stage('Final Deployment Summary') {
       steps {
-        script {
-          env.POD_NAME = sh(
-            script: 'kubectl get pods --namespace "$KUBE_NAMESPACE" -l app=$HELM_RELEASE -o jsonpath="{.items[0].metadata.name}"',
-            returnStdout: true
-          ).trim()
+        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
+          script {
+            env.POD_NAME = sh(
+              script: 'kubectl get pods --namespace "$KUBE_NAMESPACE" -l app=$HELM_RELEASE -o jsonpath="{.items[0].metadata.name}"',
+              returnStdout: true
+            ).trim()
+          }
         }
         echo "Application: pulsesg-ai-task-manager"
         echo "Domain: ${env.APP_DOMAIN}"
