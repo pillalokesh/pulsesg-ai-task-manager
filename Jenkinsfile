@@ -85,14 +85,26 @@ pipeline {
     stage('Push Frontend Image') {
       steps {
         withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
-          sh 'docker push "$FRONTEND_IMAGE"'
+          sh '''
+            if aws ecr describe-images --repository-name "$FRONTEND_ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
+              echo "Immutable image tag $IMAGE_TAG already exists in $FRONTEND_ECR_REPOSITORY, skipping push"
+            else
+              docker push "$FRONTEND_IMAGE"
+            fi
+          '''
         }
       }
     }
     stage('Push Backend Image') {
       steps {
         withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
-          sh 'docker push "$BACKEND_IMAGE"'
+          sh '''
+            if aws ecr describe-images --repository-name "$BACKEND_ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
+              echo "Immutable image tag $IMAGE_TAG already exists in $BACKEND_ECR_REPOSITORY, skipping push"
+            else
+              docker push "$BACKEND_IMAGE"
+            fi
+          '''
         }
       }
     }
