@@ -13,6 +13,8 @@ spec:
           - path: {{ .path }}
             pathType: {{ .pathType }}
             backend:
-              service: { name: {{ include "pulsesg-ai-task-manager.fullname" $ }}, port: { name: {{ .portName }} } }
+              service:
+                name: {{- if eq .portName "http-backend" }} {{ $.Release.Name }}-backend {{- else }} {{ $.Release.Name }}-frontend {{- end }}
+                port: { name: http }
         {{- end }}
 {{- end }}

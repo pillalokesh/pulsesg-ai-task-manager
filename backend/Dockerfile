@@ -1,13 +1,10 @@
-FROM maven:3.9-eclipse-temurin-17 AS build
+FROM python:3.12-slim
 WORKDIR /app
-COPY pom.xml .
-RUN mvn -q dependency:go-offline
-COPY src src
-RUN mvn -q clean package -DskipTests
-FROM eclipse-temurin:17-jre
-WORKDIR /app
-RUN useradd --system --uid 1001 appuser
-COPY --from=build /app/target/*.jar app.jar
-USER 1001
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+COPY requirements.lock ./
+COPY app ./app
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock && useradd --system --uid 10001 appuser
+USER 10001
 EXPOSE 8080
-ENTRYPOINT ["java","-jar","app.jar"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:8080' + os.getenv('APP_CONTEXT_PATH', '') + '/actuator/health')"
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

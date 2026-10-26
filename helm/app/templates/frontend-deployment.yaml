@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: {{ .Release.Name }}-frontend, labels: { app: {{ .Release.Name }}-frontend } }
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  selector: { matchLabels: { app: {{ .Release.Name }}-frontend } }
+  template:
+    metadata: { labels: { app: {{ .Release.Name }}-frontend } }
+    spec:
+      serviceAccountName: {{ include "pulsesg-ai-task-manager.serviceAccountName" . }}
+      containers:
+        - name: frontend
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          ports: [{ name: http, containerPort: 80 }]
+          env:
+            - name: BACKEND_HOST
+              value: {{ .Release.Name }}-backend
+            - name: NGINX_ENVSUBST_FILTER
+              value: ^BACKEND_HOST$
+          resources: {{- toYaml .Values.frontend.resources | nindent 12 }}
+          readinessProbe: { httpGet: { path: /, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /, port: http }, initialDelaySeconds: 15, periodSeconds: 20 }

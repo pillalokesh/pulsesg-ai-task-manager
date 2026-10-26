@@ -4,4 +4,4 @@ metadata:
   name: {{ include "pulsesg-ai-task-manager.fullname" . }}-config
 data:
   CORS_ALLOWED_ORIGINS: {{ .Values.backend.env.corsOrigins | quote }}
-  SERVER_SERVLET_CONTEXT_PATH: {{ .Values.backend.env.contextPath | quote }}
+  APP_CONTEXT_PATH: {{ .Values.backend.env.contextPath | quote }}

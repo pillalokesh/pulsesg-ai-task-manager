@@ -5,6 +5,16 @@ node_modules/
 dist/
 build/
 target/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage.xml
+test-results.xml
+.ruff_cache/
+*.egg-info/
 .idea/
 .vscode/
 *.iml

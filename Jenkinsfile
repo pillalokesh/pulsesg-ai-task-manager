@@ -1,156 +1,101 @@
 pipeline {
   agent any
   parameters {
-    choice(name: 'Environment', choices: ['dev'], description: 'Deployment environment')
-    string(name: 'Git Tag', defaultValue: 'v1.0.0', description: 'Existing Git tag to build and deploy')
+    choice(name: 'Environment', choices: ['local'], description: 'Local validation only')
+    string(name: 'Git Tag', defaultValue: '', description: 'Existing migrated Git tag to validate')
     string(name: 'Application', defaultValue: 'pulsesg-ai-task-manager', description: 'Application name')
+    string(name: 'SONARQUBE_INSTALLATION', defaultValue: '', description: 'Jenkins SonarQube server installation name')
+    string(name: 'SONAR_PROJECT_KEY', defaultValue: '', description: 'SonarQube project key')
   }
   environment {
-    AWS_REGION = 'ap-south-1'
-    EKS_CLUSTER = 'pulsesg-dev-eks'
-    KUBE_NAMESPACE = 'pulsesg-dev'
-    HELM_RELEASE = 'pulsesg-ai-task-manager'
-    HELM_CHART = 'helm/app'
-    ECR_REGISTRY = '385168913795.dkr.ecr.ap-south-1.amazonaws.com'
-    FRONTEND_ECR_REPOSITORY = 'pulsesg-ai-task-manager-frontend'
-    BACKEND_ECR_REPOSITORY = 'pulsesg-ai-task-manager-backend'
-    DB_SECRET_NAME = 'pulsesg-ai-task-manager-db'
-    APP_DOMAIN = 'https://lokeshwaffle.in/support/'
+    PYTHON = 'python3.12'
+  }
+  options {
+    disableConcurrentBuilds()
+    timestamps()
   }
   stages {
-    stage('Checkout exact Git Tag') {
+    stage('Checkout Exact Git Tag') {
       steps {
         script {
-          if (params.Environment != 'dev') { error('Only the configured dev environment is allowed') }
+          if (params.Environment != 'local') { error('Only local validation is allowed') }
           if (params.Application != 'pulsesg-ai-task-manager') { error('Application must be pulsesg-ai-task-manager') }
-          if (!(params['Git Tag'] ==~ /^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$/)) { error('Git Tag must use a version such as v1.0.0') }
+          if (!(params['Git Tag'] ==~ /^v[0-9]+[.][0-9]+[.][0-9]+([.-][0-9A-Za-z.-]+)?$/)) { error('Git Tag must use a version such as v1.0.0') }
+          if (!params.SONARQUBE_INSTALLATION?.trim()) { error('Configure the Jenkins SonarQube installation name') }
+          if (!params.SONAR_PROJECT_KEY?.trim()) { error('Configure the SonarQube project key') }
           env.IMAGE_TAG = params['Git Tag']
-          env.FRONTEND_IMAGE = "${env.ECR_REGISTRY}/${env.FRONTEND_ECR_REPOSITORY}:${env.IMAGE_TAG}"
-          env.BACKEND_IMAGE = "${env.ECR_REGISTRY}/${env.BACKEND_ECR_REPOSITORY}:${env.IMAGE_TAG}"
+          env.SONAR_PROJECT_KEY = params.SONAR_PROJECT_KEY.trim()
         }
         checkout scm
         sh 'git fetch --force --tags --prune'
         sh 'git rev-parse --verify "refs/tags/${IMAGE_TAG}^{commit}" >/dev/null'
+        sh 'git cat-file -e "refs/tags/${IMAGE_TAG}:backend/app/main.py"'
+        sh 'if git cat-file -e "refs/tags/${IMAGE_TAG}:backend/pom.xml" 2>/dev/null; then echo "Refusing a Java/Maven application tag"; exit 1; fi'
         sh 'git checkout --detach "refs/tags/${IMAGE_TAG}"'
         sh 'test "$(git describe --tags --exact-match HEAD)" = "${IMAGE_TAG}"'
       }
     }
-    stage('Frontend Test') {
+    stage('Install Python Dependencies') {
+      steps {
+        dir('backend') {
+          sh '${PYTHON} -m pip install --require-hashes -r requirements-dev.lock'
+        }
+      }
+    }
+    stage('Python Lint and Tests') {
+      steps {
+        dir('backend') {
+          sh '${PYTHON} -m ruff check app tests'
+          sh '${PYTHON} -m pytest --junitxml=test-results.xml --cov=app --cov-report=xml:coverage.xml'
+        }
+      }
+      post {
+        always {
+          junit allowEmptyResults: false, testResults: 'backend/test-results.xml'
+          archiveArtifacts allowEmptyArchive: true, artifacts: 'backend/coverage.xml'
+        }
+      }
+    }
+    stage('SonarQube Analysis') {
+      steps {
+        withSonarQubeEnv("${params.SONARQUBE_INSTALLATION}") {
+          sh 'sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.token=$SONAR_AUTH_TOKEN'
+        }
+      }
+    }
+    stage('Quality Gate') {
+      steps {
+        timeout(time: 5, unit: 'MINUTES') {
+          waitForQualityGate(abortPipeline: true)
+        }
+      }
+    }
+    stage('Frontend Validation and Build') {
       steps {
         dir('frontend') {
           sh 'npm ci'
           sh 'npm test'
-        }
-      }
-    }
-    stage('Frontend Build') {
-      steps {
-        dir('frontend') {
           sh 'npm run build'
         }
       }
     }
-    stage('Backend Test') {
+    stage('Local Docker Image Builds') {
       steps {
-        dir('backend') {
-          sh 'mvn --batch-mode clean test'
-        }
+        sh 'docker build -t pulsesg-ai-task-manager-backend:local backend'
+        sh 'docker build --build-arg VITE_API_BASE_URL=/support --build-arg VITE_BASE_PATH=/support/ -t pulsesg-ai-task-manager-frontend:local frontend'
       }
     }
-    stage('Backend Build') {
+    stage('Compose and Helm Validation') {
       steps {
-        dir('backend') {
-          sh 'mvn --batch-mode clean package -DskipTests'
-        }
+        sh 'docker compose config --quiet'
+        sh 'helm lint helm/app'
+        sh 'helm template pulsesg-ai-task-manager helm/app --namespace pulsesg-dev --set backend.image.repository=pulsesg-ai-task-manager-backend --set backend.image.tag=local --set frontend.image.repository=pulsesg-ai-task-manager-frontend --set frontend.image.tag=local'
       }
     }
-    stage('Docker Build Frontend') {
-      steps {
-        sh 'docker build --build-arg VITE_API_BASE_URL=/support/api --build-arg VITE_BASE_PATH=/support/ -t "$FRONTEND_IMAGE" frontend'
-      }
-    }
-    stage('Docker Build Backend') {
-      steps {
-        sh 'docker build -t "$BACKEND_IMAGE" backend'
-      }
-    }
-    stage('ECR Login') {
-      steps {
-        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
-          sh 'aws ecr describe-repositories --repository-names "$FRONTEND_ECR_REPOSITORY" "$BACKEND_ECR_REPOSITORY"'
-          sh 'aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"'
-        }
-      }
-    }
-    stage('Push Frontend Image') {
-      steps {
-        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
-          sh '''
-            if aws ecr describe-images --repository-name "$FRONTEND_ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
-              echo "Immutable image tag $IMAGE_TAG already exists in $FRONTEND_ECR_REPOSITORY, skipping push"
-            else
-              docker push "$FRONTEND_IMAGE"
-            fi
-          '''
-        }
-      }
-    }
-    stage('Push Backend Image') {
-      steps {
-        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
-          sh '''
-            if aws ecr describe-images --repository-name "$BACKEND_ECR_REPOSITORY" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
-              echo "Immutable image tag $IMAGE_TAG already exists in $BACKEND_ECR_REPOSITORY, skipping push"
-            else
-              docker push "$BACKEND_IMAGE"
-            fi
-          '''
-        }
-      }
-    }
-    stage('Configure EKS') {
-      steps {
-        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
-          sh 'aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"'
-        }
-      }
-    }
-    stage('Helm Deploy') {
-      steps {
-        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
-          sh 'helm upgrade --install "$HELM_RELEASE" "$HELM_CHART" --namespace "$KUBE_NAMESPACE" --create-namespace --set-string frontend.image.repository="$ECR_REGISTRY/$FRONTEND_ECR_REPOSITORY" --set-string frontend.image.tag="$IMAGE_TAG" --set-string backend.image.repository="$ECR_REGISTRY/$BACKEND_ECR_REPOSITORY" --set-string backend.image.tag="$IMAGE_TAG" --set-string backend.secret.existingSecret="$DB_SECRET_NAME"'
-        }
-      }
-    }
-    stage('Rollout Verification') {
-      steps {
-        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
-          sh 'kubectl rollout status deployment/$HELM_RELEASE --namespace "$KUBE_NAMESPACE" --timeout=180s'
-          sh 'kubectl wait --for=condition=Ready pod -l app=$HELM_RELEASE --namespace "$KUBE_NAMESPACE" --timeout=180s'
-        }
-      }
-    }
-    stage('Health Verification') {
-      steps {
-        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
-          sh 'kubectl port-forward service/$HELM_RELEASE 18080:8080 --namespace "$KUBE_NAMESPACE" >/tmp/$HELM_RELEASE-port-forward.log 2>&1 & PF_PID=$!; trap "kill $PF_PID" EXIT; sleep 5; curl --fail --silent --show-error http://127.0.0.1:18080/support/actuator/health'
-        }
-      }
-    }
-    stage('Final Deployment Summary') {
-      steps {
-        withAWS(credentials: 'aws-jenkins', region: env.AWS_REGION) {
-          script {
-            env.POD_NAME = sh(
-              script: 'kubectl get pods --namespace "$KUBE_NAMESPACE" -l app=$HELM_RELEASE -o jsonpath="{.items[0].metadata.name}"',
-              returnStdout: true
-            ).trim()
-          }
-        }
-        echo "Application: pulsesg-ai-task-manager"
-        echo "Domain: ${env.APP_DOMAIN}"
-        echo "Pod: ${env.POD_NAME}"
-      }
+  }
+  post {
+    always {
+      echo 'Local validation pipeline complete. This pipeline has no registry push or deployment stages.'
     }
   }
 }

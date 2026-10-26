@@ -2,6 +2,7 @@ nameOverride: pulsesg-ai-task-manager
 namespace: pulsesg-dev
 replicaCount: 1
 frontend:
+  replicas: 1
   image: { repository: 385168913795.dkr.ecr.ap-south-1.amazonaws.com/pulsesg-ai-task-manager-frontend, tag: v1.0.0, pullPolicy: IfNotPresent }
   apiBaseUrl: /support/api
   basePath: /support/
@@ -9,6 +10,7 @@ frontend:
   service: { port: 80 }
   resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 250m, memory: 256Mi } }
 backend:
+  replicas: 1
   image: { repository: 385168913795.dkr.ecr.ap-south-1.amazonaws.com/pulsesg-ai-task-manager-backend, tag: v1.0.0, pullPolicy: IfNotPresent }
   containerPort: 8080
   service: { port: 8080 }
