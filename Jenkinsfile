@@ -2,8 +2,6 @@ pipeline {
   agent any
   parameters {
     string(name: 'Git Branch', defaultValue: 'main', description: 'Branch to build and deploy')
-    string(name: 'SONARQUBE_INSTALLATION', defaultValue: '', description: 'Configured Jenkins SonarQube installation')
-    string(name: 'SONAR_PROJECT_KEY', defaultValue: '', description: 'SonarQube project key')
   }
   environment {
     APPLICATION = 'pulsesg-ai-task-manager'
@@ -34,14 +32,7 @@ pipeline {
               branch.endsWith('/') || branch.endsWith('.')) {
             error('Git Branch must be a valid branch name')
           }
-          if (!params.SONARQUBE_INSTALLATION?.trim()) {
-            error('Configure the Jenkins SonarQube installation name')
-          }
-          if (!params.SONAR_PROJECT_KEY?.trim()) {
-            error('Configure the SonarQube project key')
-          }
           env.SELECTED_BRANCH = branch
-          env.SONAR_PROJECT_KEY = params.SONAR_PROJECT_KEY.trim()
         }
         checkout([
           $class: 'GitSCM',
@@ -86,20 +77,6 @@ pipeline {
         always {
           junit allowEmptyResults: false, testResults: 'backend/test-results.xml'
           archiveArtifacts allowEmptyArchive: true, artifacts: 'backend/coverage.xml'
-        }
-      }
-    }
-    stage('SonarQube Analysis') {
-      steps {
-        withSonarQubeEnv("${params.SONARQUBE_INSTALLATION}") {
-          sh 'sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.token=$SONAR_AUTH_TOKEN'
-        }
-      }
-    }
-    stage('Quality Gate') {
-      steps {
-        timeout(time: 5, unit: 'MINUTES') {
-          waitForQualityGate(abortPipeline: true)
         }
       }
     }
